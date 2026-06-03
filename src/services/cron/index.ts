@@ -1,4 +1,8 @@
 import puppeteer from "puppeteer"
+import { db } from "@/lib/db"
+import { rateTable } from "@/lib/db/schema"
+import { redis } from "@/lib/db/redis"
+import { asc, gte } from "drizzle-orm"
 
 export async function cronjobServices() {
   const browser = await puppeteer.launch({
@@ -16,9 +20,6 @@ export async function cronjobServices() {
     await page.goto("https://www.morningstar.com/markets/currencies", {
       waitUntil: "networkidle2",
     })
-
-    const title = await page.title()
-    console.log("Page title loaded:", title)
 
     // Wait for the table headers to load
     await page.waitForSelector('th[role="rowheader"]', { timeout: 15000 })
@@ -53,8 +54,59 @@ export async function cronjobServices() {
       }
     })
 
-    // console.log them
     console.log("Extracted IDR data:", result)
+
+    if (result && result.rate && result.datetime) {
+      const parsedRateNum = parseFloat(result.rate.replace(/,/g, ""))
+      const parsedDateTime = new Date(result.datetime)
+
+      // 1. Save to PG database
+      await db.insert(rateTable).values({
+        id: crypto.randomUUID(),
+        rate: parsedRateNum.toString(),
+        dateTime: parsedDateTime,
+      })
+
+      // 2. Determine the open rate (at 00:00)
+      let openRateStr = await redis.get("rate:open")
+      let openRateVal: number
+
+      if (!openRateStr) {
+        // Query Postgres for the first rate of the day
+        const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
+
+        const todayRates = await db
+          .select()
+          .from(rateTable)
+          .where(gte(rateTable.createdAt, todayStart))
+          .orderBy(asc(rateTable.createdAt))
+          .limit(1)
+
+        if (todayRates.length > 0) {
+          openRateVal = parseFloat(todayRates[0].rate)
+        } else {
+          openRateVal = parsedRateNum
+        }
+
+        await redis.set("rate:open", openRateVal.toString())
+      } else {
+        openRateVal = parseFloat(openRateStr)
+      }
+
+      // 3. Calculate change & changePercentage
+      const change = parsedRateNum - openRateVal
+      const changePercentage = (change / openRateVal) * 100
+
+      // 4. Update Redis rate:latest
+      const latestData = {
+        rate: parsedRateNum,
+        dateTime: parsedDateTime.toISOString(),
+        change: parseFloat(change.toFixed(4)),
+        changePercentage: parseFloat(changePercentage.toFixed(4)),
+      }
+      await redis.set("rate:latest", JSON.stringify(latestData))
+      console.log("Updated Redis & Postgres:", latestData)
+    }
   } catch (error) {
     console.error("Error during scraping:", error)
     try {

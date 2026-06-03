@@ -4,10 +4,16 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.23",
-    "puppeteer": "^25.1.0"
+    "pg": "^8.21.0",
+    "puppeteer": "^25.1.0",
+    "redis": "^6.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/pg": "^8.20.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.22.4"
   }
 }
