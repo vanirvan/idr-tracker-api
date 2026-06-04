@@ -105,6 +105,18 @@ export async function cronjobServices() {
         changePercentage: parseFloat(changePercentage.toFixed(4)),
       }
       await redis.set("rate:latest", JSON.stringify(latestData))
+
+      // 5. Add to Redis Sorted Set rate:history
+      const historyMember = JSON.stringify({
+        rate: parsedRateNum,
+        dateTime: parsedDateTime.toISOString(),
+      })
+      const score = parsedDateTime.getTime()
+      await redis.zAdd("rate:history", {
+        score: score,
+        value: historyMember
+      })
+
       console.log("Updated Redis & Postgres:", latestData)
     }
   } catch (error) {
